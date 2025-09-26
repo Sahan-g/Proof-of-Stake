@@ -1,0 +1,87 @@
+const express = require("express");
+const bodyParser = require("body-parser");
+const Block = require("../blockchain/block");
+const Blockchain = require("../blockchain/index");
+const Wallet = require("../wallet");
+const TransactionPool = require("../transaction/transaction-pool");
+
+const P2PServer = require("./p2p-server");
+
+const PORT = process.env.PORT || 3001;
+
+const app = express();
+
+const startServer = async () => {
+  app.use(bodyParser.json());
+
+  const wallet = await Wallet.loadOrCreate();
+  const blockchain = await Blockchain.create(wallet);
+  const tp = new TransactionPool();
+  const p2pServer = new P2PServer(blockchain, tp, bidManager);
+
+  app.get("/blocks", (req, res) => {
+    res.json(blockchain.chain);
+  });
+
+  app.get("/transaction", (req, res) => {
+    res.json(tp.transactions);
+  });
+
+  // app.post("/transact", (req, res) => {
+  //   const { recipient, amount } = req.body;
+  //   const transaction = wallet.createTransaction(recipient, amount, tp, bc);
+  //   p2pServer.broadcastTransaction(transaction);
+
+  //   res.redirect("/transaction");
+  // });
+
+  // Create a sensor reading transaction (IoT)
+  app.post("/transact", (req, res) => {
+    try {
+      const { sensor_id, reading, metadata } = req.body;
+
+      // Basic validation
+      if (!sensor_id || typeof sensor_id !== "string") {
+        return res
+          .status(400)
+          .json({ ok: false, error: "sensor_id is required (string)" });
+      }
+      if (!reading || typeof reading !== "object" || Array.isArray(reading)) {
+        return res
+          .status(400)
+          .json({ ok: false, error: "reading must be a non-null object" });
+      }
+      if (
+        metadata != null &&
+        (typeof metadata !== "object" || Array.isArray(metadata))
+      ) {
+        return res
+          .status(400)
+          .json({ ok: false, error: "metadata must be an object if provided" });
+      }
+
+      const tx = wallet.createTransaction(sensor_id, reading, tp, metadata);
+      p2pServer.transactionPool.updateOrAddTransaction(tx)
+      p2pServer.broadcastTransaction(tx);
+
+      return res.status(201).json({ ok: true, transaction: tx });
+    } catch (err) {
+      console.error("Failed to create transaction:", err);
+      return res
+        .status(500)
+        .json({ ok: false, error: err.message || "internal error" });
+    }
+  });
+
+  app.listen(PORT, () => {
+    console.log(`\nServer is running on port ${PORT}`);
+  });
+
+  p2pServer.listen();
+
+  p2pServer.syncChains();
+
+
+};
+
+startServer();
