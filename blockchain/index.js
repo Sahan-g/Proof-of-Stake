@@ -30,15 +30,16 @@ class Blockchain {
         return this.chain[this.chain.length - 1]; 
     }
 
-    async addBlockToChain(block) {
-        console.log(block);
-        if (Block.verifyBlock(block) && Block.isValidBlock(block, this.getLastBlock())) {
+    async addBlockToChain(block, stakeManager) {
+        console.log('Attempting to add block:', block);
+        if (Block.verifyBlock(block, stakeManager) && Block.isValidBlock(block, this.getLastBlock())) {
             this.chain.push(block);
             await db.saveChain(this.chain);
             console.log('👍 Block added to chain and saved to DB.');
             return true;
         } else {
             console.log('❌ Invalid block. Not added to chain.');
+            return false;
         }
     }
 
@@ -46,23 +47,55 @@ class Blockchain {
         if(chain.length === 1) {
             return true;
         }
+        
+        console.log('Validating chain of length:', chain.length);
+        
         for (let i = 1; i < chain.length; i++) {
             const currentBlock = Block.fromObject(chain[i]);
             const previousBlock = Block.fromObject(chain[i - 1]);
             
+            console.log(`Validating block ${i}:`, {
+                index: currentBlock.index,
+                proposer: currentBlock.proposerPublicKey,
+                prevHash: currentBlock.previousHash,
+                actualPrevHash: previousBlock.hash
+            });
+            
             if (currentBlock.previousHash !== previousBlock.hash) {
+                console.log('Invalid previous hash:', {
+                    expected: previousBlock.hash,
+                    actual: currentBlock.previousHash,
+                    blockIndex: i
+                });
                 return false;
             }
 
-            const blockString = currentBlock.index + JSON.stringify(currentBlock.transactions) + currentBlock.previousHash;
+            const blockString = currentBlock.index + currentBlock.timestamp + 
+                              JSON.stringify(currentBlock.transactions) + 
+                              currentBlock.previousHash + currentBlock.proposerPublicKey + 
+                              currentBlock.stake + currentBlock.lastBlockTime;
+                              
             const currentBlockHash = ChainUtil.createHash(blockString);
             if (currentBlockHash !== currentBlock.hash) {
-                console.log(`Invalid hash at block ${i}: computed ${currentBlockHash}, expected ${currentBlock.hash}`);
+                console.log('Invalid block hash:', {
+                    computed: currentBlockHash,
+                    actual: currentBlock.hash,
+                    blockIndex: i
+                });
+                return false;
+            }
+
+            if (currentBlock.timestamp <= previousBlock.timestamp) {
+                console.log('Invalid block timestamp:', {
+                    current: currentBlock.timestamp,
+                    previous: previousBlock.timestamp,
+                    blockIndex: i
+                });
                 return false;
             }
         }
+        
         console.log("👍 Chain is valid");
-
         return true;
     }
 

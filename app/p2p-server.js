@@ -29,6 +29,39 @@ class P2PServer {
         this.stakeManager = new StakeManager();
         this.validatorSelector = new ValidatorSelector(this.stakeManager);
         this.lastBlockTime = Date.now();
+        this.nextBlockTime = null; // Will be set during sync
+        this.hasInitialStake = false; // Track if initial stake is set
+    }
+
+    async initializeStake() {
+        if (this.hasInitialStake) return;
+
+        const currentStake = this.stakeManager.getStake(this.wallet.publicKey);
+        if (!currentStake) {
+            try {
+                // Add initial stake of 1000 units
+                const initialStake = 1000;
+                const stakeInfo = this.stakeManager.addStake(
+                    this.wallet.publicKey,
+                    initialStake,
+                    Date.now()
+                );
+                console.log('Added initial stake:', {
+                    publicKey: this.wallet.publicKey,
+                    amount: initialStake,
+                    timestamp: stakeInfo.timestamp
+                });
+                this.hasInitialStake = true;
+            } catch (error) {
+                console.error('Failed to add initial stake:', error.message);
+            }
+        } else {
+            this.hasInitialStake = true;
+            console.log('Node already has stake:', {
+                publicKey: this.wallet.publicKey,
+                amount: currentStake.amount
+            });
+        }
     }
 
     async listen() {
@@ -96,7 +129,6 @@ class P2PServer {
         console.log(`👨 New peer connected: ${socket.url}`);
         this.messageHandler(socket);
         this.sendChain(socket)
-        this.sendRound(socket, this.bidManager.round); 
 
         socket.on('close', () => {
             console.log(`❌ Connection to a peer closed`);
@@ -109,14 +141,14 @@ class P2PServer {
             const data = JSON.parse(message);
             switch (data.type) {
                 case MESSAGE_TYPES.chain:
-                    this.blockchain.replaceChain(data.chain, this.bidManager);
+                    this.blockchain.replaceChain(data.chain);
                     break;
                 case MESSAGE_TYPES.transaction:
                     this.transactionPool.updateOrAddTransaction(data.transaction);
                     break;
                 case MESSAGE_TYPES.block:
                     console.log(`📥 Block received with index ${JSON.stringify(data.block.index)} at p2p-server}`);
-                    const isAdded = this.blockchain.addBlockToChain(data.block);
+                    const isAdded = this.blockchain.addBlockToChain(data.block, this.stakeManager);
                     if (isAdded) {
                         this.transactionPool.removeConfirmedTransactions(data.block.transactions);
                     }
@@ -165,10 +197,66 @@ class P2PServer {
         });
     }
 
-    startBlockProduction() {
-        setInterval(() => {
-            this.tryProduceBlock();
-        }, BLOCK_TIME);
+    async startBlockProduction() {
+        // Initialize stake before starting block production
+        await this.initializeStake();
+        
+        // Initial sync with bootstrap server
+        await this.syncBlockTime();
+        
+        // Start the block production loop
+        this.scheduleNextBlock();
+
+        // Log validator status
+        const stake = this.stakeManager.getStake(this.wallet.publicKey);
+        const isActive = this.stakeManager.isActiveValidator(this.wallet.publicKey, Date.now());
+        console.log('Validator status:', {
+            publicKey: this.wallet.publicKey,
+            stake: stake ? stake.amount : 0,
+            isActive: isActive,
+            totalStaked: this.stakeManager.getTotalStake()
+        });
+    }
+
+    async syncBlockTime() {
+        try {
+            const response = await axios.get(`${BOOTSTRAP_ADDRESS}/block-time`);
+            const { nextBlockTime, currentTime } = response.data;
+            
+            // Adjust for network latency
+            const timeNow = Date.now();
+            const networkLatency = (timeNow - currentTime) / 2;
+            this.nextBlockTime = nextBlockTime + networkLatency;
+            
+            console.log('Synchronized block time:', {
+                nextBlock: new Date(this.nextBlockTime).toISOString(),
+                networkLatency: `${networkLatency}ms`
+            });
+        } catch (error) {
+            console.error('Failed to sync block time:', error.message);
+        }
+    }
+
+    scheduleNextBlock() {
+        const now = Date.now();
+        
+        // If we missed the next block time, sync with bootstrap
+        if (now > this.nextBlockTime) {
+            this.syncBlockTime().then(() => this.scheduleNextBlock());
+            return;
+        }
+
+        const timeUntilNextBlock = this.nextBlockTime - now;
+        console.log(`Scheduling next block in ${timeUntilNextBlock}ms`);
+
+        setTimeout(async () => {
+           
+            await this.tryProduceBlock();
+            
+            // After producing (or trying to produce) a block, sync time and schedule next
+            await this.syncBlockTime();
+            this.scheduleNextBlock();
+        }, timeUntilNextBlock);
     }
 
     async tryProduceBlock() {
@@ -177,7 +265,6 @@ class P2PServer {
             currentTime,
             this.lastBlockTime
         );
-
         if (selectedValidator === this.wallet.publicKey) {
             const lastBlock = this.blockchain.getLastBlock();
             const transactions = this.transactionPool.validTransactions();
@@ -199,7 +286,8 @@ class P2PServer {
                 wallet: this.wallet
             });
 
-            if (await this.blockchain.addBlockToChain(block)) {
+            if (await this.blockchain.addBlockToChain(block, this.stakeManager)) {
+                console.log('Successfully added new block to chain');
                 this.broadcastBlock(block);
                 this.transactionPool.removeConfirmedTransactions(transactions);
                 this.lastBlockTime = currentTime;

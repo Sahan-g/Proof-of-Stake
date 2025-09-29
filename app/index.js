@@ -17,7 +17,7 @@ const startServer = async () => {
   const wallet = await Wallet.loadOrCreate();
   const blockchain = await Blockchain.create(wallet);
   const tp = new TransactionPool();
-  const p2pServer = new P2PServer(blockchain, tp, bidManager);
+  const p2pServer = new P2PServer(blockchain, tp,wallet);
 
   app.get("/blocks", (req, res) => {
     res.json(blockchain.chain);
@@ -73,6 +73,51 @@ const startServer = async () => {
     }
   });
 
+  // Staking endpoint
+  app.post("/stake", (req, res) => {
+    try {
+      const { amount } = req.body;
+      if (!amount || typeof amount !== "number" || amount <= 0) {
+        return res.status(400).json({ error: "Valid amount required" });
+      }
+      
+      const stakeInfo = p2pServer.stakeManager.addStake(
+        wallet.publicKey,
+        amount,
+        Date.now()
+      );
+      
+      return res.json({ 
+        success: true, 
+        stake: stakeInfo,
+        message: "Stake added successfully" 
+      });
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Get validator status
+  app.get("/validator-status", (req, res) => {
+    const stake = p2pServer.stakeManager.getStake(wallet.publicKey);
+    const isActive = p2pServer.stakeManager.isActiveValidator(
+      wallet.publicKey,
+      Date.now()
+    );
+    res.json({
+      publicKey: wallet.publicKey,
+      stake: stake || 0,
+      isActive: isActive,
+      totalStaked: p2pServer.stakeManager.getTotalStake()
+    });
+  });
+
+  // Get all validators
+  app.get("/validators", (req, res) => {
+    const activeValidators = p2pServer.stakeManager.getActiveValidators(Date.now());
+    res.json(activeValidators);
+  });
+
   app.listen(PORT, () => {
     console.log(`\nServer is running on port ${PORT}`);
   });
@@ -81,7 +126,8 @@ const startServer = async () => {
 
   p2pServer.syncChains();
 
-
+  // Start PoS block production
+  p2pServer.startBlockProduction();
 };
 
 startServer();

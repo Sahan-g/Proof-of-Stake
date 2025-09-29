@@ -3,9 +3,12 @@ const bodyParser = require('body-parser');
 const app = express();
 
 const PORT = 4000;
+const BLOCK_INTERVAL = 15000; // 15 seconds between blocks
 
 let peers = [];
 let heartbeats = new Map();
+let lastBlockTime = Date.now();
+let nextBlockTime = lastBlockTime + BLOCK_INTERVAL;
 
 app.use(bodyParser.json());
 
@@ -30,6 +33,24 @@ app.post('/unregister', (req, res) => {
 app.get('/peers', (req, res) => {
     console.log(`Fetching registered peers ${peers}`);
     res.json(peers);
+});
+
+// Get next block time
+app.get('/block-time', (req, res) => {
+    const now = Date.now();
+    
+    // If we've passed the next block time, calculate the next one
+    while (nextBlockTime <= now) {
+        lastBlockTime = nextBlockTime;
+        nextBlockTime = lastBlockTime + BLOCK_INTERVAL;
+    }
+    
+    res.json({
+        lastBlockTime,
+        nextBlockTime,
+        currentTime: now,
+        timeUntilNextBlock: nextBlockTime - now
+    });
 });
 
 app.post('/heartbeat', (req, res) => {

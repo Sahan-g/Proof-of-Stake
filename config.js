@@ -1,6 +1,6 @@
 // Proof of Stake Configuration
 const MINIMUM_STAKE = 1000; // Minimum amount required to become a validator
-const STAKE_MATURITY_TIME = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+const STAKE_MATURITY_TIME = 1 * 60 * 1000; // 1 minute in milliseconds (for testing)
 const BLOCK_TIME = 15 * 1000; // 15 seconds in milliseconds
 const ROUND_INTERVAL = 60 * 1000; // 1 minute in milliseconds
 const MAX_VALIDATORS = 100; // Maximum number of validators allowed

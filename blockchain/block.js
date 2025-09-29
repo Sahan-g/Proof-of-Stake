@@ -31,28 +31,52 @@ class Block {
     }
 
     static verifyBlock(block, stakeManager) {
+        console.log('Verifying block:', {
+            index: block.index,
+            proposer: block.proposerPublicKey,
+            stake: block.stake,
+            timestamp: block.timestamp
+        });
+
         const blockString = block.index + block.timestamp + JSON.stringify(block.transactions) + 
                           block.previousHash + block.proposerPublicKey + block.stake + block.lastBlockTime;
-        if (block.hash !== ChainUtil.createHash(blockString)) {
-            console.log("Invalid block hash");
+        const computedHash = ChainUtil.createHash(blockString);
+        if (block.hash !== computedHash) {
+            console.log("Invalid block hash:", {
+                computed: computedHash,
+                actual: block.hash,
+                blockString
+            });
             return false;
         }
 
         if (!ChainUtil.verifySignature(block.proposerPublicKey, block.signature, block.hash)) {
-            console.log("Invalid block signature");
+            console.log("Invalid block signature:", {
+                proposerKey: block.proposerPublicKey,
+                signature: block.signature,
+                hash: block.hash
+            });
             return false;
         }
 
         // Verify proposer's stake
         const validatorStake = stakeManager.getStake(block.proposerPublicKey);
         if (!validatorStake || validatorStake.amount !== block.stake) {
-            console.log("Invalid stake amount");
+            console.log("Invalid stake amount:", {
+                expected: validatorStake ? validatorStake.amount : 'No stake',
+                actual: block.stake,
+                proposer: block.proposerPublicKey
+            });
             return false;
         }
 
         // Verify validator is active
         if (!stakeManager.isActiveValidator(block.proposerPublicKey, block.timestamp)) {
-            console.log("Proposer is not an active validator");
+            console.log("Proposer is not an active validator:", {
+                proposer: block.proposerPublicKey,
+                stake: validatorStake,
+                timestamp: block.timestamp
+            });
             return false;
         }
 
@@ -87,8 +111,28 @@ class Block {
     }
 
     static fromObject(obj) {
-        const { index, timestamp, transactions, previousHash, proposerPublicKey, hash, signature } = obj;
-        return new this({index, timestamp, transactions, previousHash, proposerPublicKey, hash, signature});
+        const { 
+            index, 
+            timestamp, 
+            transactions, 
+            previousHash, 
+            proposerPublicKey, 
+            hash, 
+            signature,
+            stake,
+            lastBlockTime 
+        } = obj;
+        return new this({
+            index, 
+            timestamp, 
+            transactions, 
+            previousHash, 
+            proposerPublicKey, 
+            hash, 
+            signature,
+            stake,
+            lastBlockTime
+        });
     }
 }
 

@@ -41,21 +41,25 @@ class Transaction {
   }
 
   static verifyTransaction(transaction) {
-    const expectedHash = ChainUtil.createHash({
+    if (!transaction.input || !transaction.input.signature) {
+      console.error('Transaction missing signature');
+      return false;
+    }
+
+    const payload = {
       id: transaction.id,
       timestamp: transaction.timestamp,
       sensor_id: transaction.sensor_id,
       reading: transaction.reading,
       metadata: transaction.metadata,
-    });
-    console.log(expectedHash)
-    console.log(transaction.hash)
-    if (expectedHash !== transaction.hash) return false;
+    };
+    
+    const hash = ChainUtil.createHash(payload);
 
     return ChainUtil.verifySignature(
       transaction.input.address,
       transaction.input.signature,
-      transaction.hash
+      hash
     );
   }
 

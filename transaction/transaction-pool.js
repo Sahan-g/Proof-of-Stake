@@ -36,23 +36,25 @@ class TransactionPool {
 
   validTransactions() {
     return this.transactions.filter((transaction) => {
-      const outputTotal = transaction.outputs.reduce((total, output) => {
-        return total + output.amount;
-      }, 0);
-
-      if (transaction.input.amount !== outputTotal) {
-        console.error(
-          `Invalid transaction from ${transaction.input.address}. Output total ${outputTotal} does not match input amount ${transaction.input.amount}`
-        );
-        return;
+      // Validate required fields for sensor data
+      if (!transaction.sensor_id || !transaction.reading) {
+        console.error('Invalid transaction: missing sensor_id or reading');
+        return false;
       }
 
-      if (!Transaction.verifyTransaction(transaction)) {
-        console.error(`Invalid signature from ${transaction.input.address}`);
-        return;
+      // Validate reading structure
+      if (typeof transaction.reading !== 'object' || !transaction.reading.value) {
+        console.error('Invalid transaction: malformed reading data');
+        return false;
       }
 
-      return transaction;
+      // Verify transaction signature
+      if (!transaction.input || !Transaction.verifyTransaction(transaction)) {
+        console.error(`Invalid signature from ${transaction.input?.address}`);
+        return false;
+      }
+
+      return true;
     });
   }
 
