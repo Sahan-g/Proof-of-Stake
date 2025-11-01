@@ -1,49 +1,117 @@
-const { randomBytes } = require('crypto');
-const { STAKE_MATURITY_TIME } = require('../config');
+const ChainUtil = require('../chain-util');
 
 class ValidatorSelector {
     constructor(stakeManager) {
         this.stakeManager = stakeManager;
     }
 
-    selectValidator(currentTime, lastBlockTime) {
+    /**
+     * Deterministic validator selection
+     * All nodes compute the same winner based on VRF seed and stakes
+     * Uses hash of (seed + publicKey) as randomness, weighted by stake
+     */
+    selectValidator(currentTime, lastBlockHash, wallet) {
         const activeValidators = this.stakeManager.getActiveValidators(currentTime);
-        if (activeValidators.length === 0) return null;
+        if (activeValidators.length === 0) {
+            console.log('❌ No active validators available');
+            return null;
+        }
 
-        // Calculate selection seed using previous block time
-        const seed = this._generateSeed(lastBlockTime);
+        // Create VRF seed from last block hash and current time slot
+        const timeSlot = Math.floor(currentTime / 15000); // 15 second slots
+        const vrfSeed = `${lastBlockHash}-${timeSlot}`;
         
-        // Calculate weighted probabilities based on stake amounts
         const totalStake = this.stakeManager.getTotalStake();
-        let cumulativeProbability = 0;
-        const validatorProbabilities = activeValidators.map(validator => {
-            const stakeProbability = validator.stake / totalStake;
-            cumulativeProbability += stakeProbability;
-            return {
-                ...validator,
-                cumulativeProbability
-            };
+        const myStake = this.stakeManager.getStake(wallet.publicKey);
+        
+        if (!myStake || !myStake.active) {
+            console.log('⏭️  Node is not an active validator');
+            return null;
+        }
+
+        // Compute priority for all validators deterministically
+        // All nodes can compute this the same way
+        let winnerPriority = null;
+        let winnerPublicKey = null;
+        
+        for (const validator of activeValidators) {
+            // Deterministic hash based on seed + public key (everyone can compute this)
+            const combinedHash = ChainUtil.createHash(vrfSeed + validator.publicKey);
+            const hashValue = this.vrfHashToNumber(combinedHash);
+            
+            // Priority: divide by stake weight (higher stake = lower priority value = more likely to win)
+            const stakeWeight = validator.stake / totalStake;
+            const priority = Number(hashValue) / stakeWeight;
+            
+            if (winnerPriority === null || priority < winnerPriority) {
+                winnerPriority = priority;
+                winnerPublicKey = validator.publicKey;
+            }
+        }
+
+        const isWinner = winnerPublicKey === wallet.publicKey;
+
+        console.log('🎲 VRF Selection:', {
+            slot: timeSlot,
+            myStake: myStake.amount,
+            totalStake,
+            validators: activeValidators.length,
+            winner: isWinner ? '✅ ME' : '❌ ' + winnerPublicKey.substring(0, 10) + '...'
         });
 
-        // Select validator based on weighted random selection
-        const random = seed / BigInt(2 ** 256); // Normalize to [0, 1)
-        const selectedValidator = validatorProbabilities.find(
-            v => v.cumulativeProbability >= random
-        );
-
-        return selectedValidator ? selectedValidator.publicKey : activeValidators[0].publicKey;
+        return isWinner ? wallet.publicKey : null;
     }
 
-    _generateSeed(lastBlockTime) {
-        const buffer = randomBytes(32);
-        const timeBuffer = Buffer.alloc(8);
-        timeBuffer.writeBigInt64BE(BigInt(lastBlockTime));
+    /**
+     * Compute VRF proof by signing the seed with the wallet's private key
+     */
+    computeVRFProof(seed, wallet) {
+        const seedHash = ChainUtil.createHash(seed);
+        const signature = wallet.sign(seedHash);
+        return `${wallet.publicKey}-${signature}-${seedHash}`;
+    }
+
+    /**
+     * Verify VRF proof from another validator
+     */
+    verifyVRFProof(proof, publicKey, seed) {
+        const parts = proof.split('-');
+        if (parts.length !== 3) return false;
+
+        const [claimedPublicKey, signature, seedHash] = parts;
         
-        for (let i = 0; i < 8; i++) {
-            buffer[i] ^= timeBuffer[i];
+        if (claimedPublicKey !== publicKey) return false;
+        
+        const expectedSeedHash = ChainUtil.createHash(seed);
+        if (seedHash !== expectedSeedHash) return false;
+
+        return ChainUtil.verifySignature(publicKey, signature, seedHash);
+    }
+
+    /**
+     * Convert VRF hash to BigInt for comparison
+     */
+    vrfHashToNumber(hash) {
+        return BigInt('0x' + hash);
+    }
+
+    /**
+     * Check if a validator should have won based on their VRF proof
+     */
+    validateSelection(validatorPublicKey, vrfProof, seed, timestamp, stakeAmount, totalStake) {
+        // Verify the VRF proof is valid
+        if (!this.verifyVRFProof(vrfProof, validatorPublicKey, seed)) {
+            console.log('Invalid VRF proof');
+            return false;
         }
-        
-        return BigInt('0x' + buffer.toString('hex'));
+
+        // Calculate if validator should have won
+        const vrfHash = ChainUtil.createHash(vrfProof);
+        const vrfValue = this.vrfHashToNumber(vrfHash);
+        const stakeRatio = stakeAmount / totalStake;
+        const threshold = stakeRatio * (2 ** 256);
+
+        return vrfValue < threshold;
     }
 }
 

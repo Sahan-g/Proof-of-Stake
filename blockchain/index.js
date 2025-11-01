@@ -99,22 +99,21 @@ class Blockchain {
         return true;
     }
 
-    async replaceChain(newChain, bidManager) {
-        if (newChain.length < this.chain.length) {
-            console.log('Received chain is not longer than the current chain. Ignoring.');
+    async replaceChain(newChain) {
+        if (newChain.length <= this.chain.length) {
+            console.log(`⏭️  Received chain (${newChain.length} blocks) is not longer than current chain (${this.chain.length} blocks). Ignoring.`);
             return;
         }
 
         if (!this.isChainValid(newChain)) {
-            console.log('Received chain is invalid. Ignoring.');
+            console.log('❌ Received chain is invalid. Ignoring.');
             return;
         }
 
-        console.log('Replacing current chain with new chain.');
-        this.chain = newChain;
+        console.log(`🔄 Replacing current chain (${this.chain.length} blocks) with new chain (${newChain.length} blocks)`);
+        this.chain = newChain.map(blockData => Block.fromObject(blockData));
         await db.saveChain(this.chain);
-        console.log('Replaced chain and saved it to DB.');
-        
+        console.log('✅ Replaced chain and saved it to DB.');
     }
 }
 
