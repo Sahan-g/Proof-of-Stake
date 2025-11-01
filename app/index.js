@@ -8,6 +8,7 @@ const TransactionPool = require("../transaction/transaction-pool");
 const P2PServer = require("./p2p-server");
 
 const PORT = process.env.PORT || 3001;
+const ENABLE_SENSOR_SIM = process.env.ENABLE_SENSOR_SIM === 'true';
 
 const app = express();
 
@@ -87,10 +88,16 @@ const startServer = async () => {
         Date.now()
       );
       
+      // Broadcast stake update to peers
+      p2pServer.broadcastStake({
+        publicKey: wallet.publicKey,
+        ...stakeInfo
+      });
+      
       return res.json({ 
         success: true, 
         stake: stakeInfo,
-        message: "Stake added successfully" 
+        message: "Stake added successfully and broadcasted to peers" 
       });
     } catch (error) {
       return res.status(400).json({ error: error.message });
@@ -118,16 +125,61 @@ const startServer = async () => {
     res.json(activeValidators);
   });
 
+  // Manual chain sync endpoint for debugging
+  app.post("/sync-chain", (req, res) => {
+    p2pServer.syncChains();
+    res.json({ 
+      message: "Chain sync requested",
+      currentHeight: blockchain.chain.length,
+      peers: p2pServer.sockets.length
+    });
+  });
+
   app.listen(PORT, () => {
     console.log(`\nServer is running on port ${PORT}`);
   });
 
-  p2pServer.listen();
+  // Start P2P and wait for network to be ready
+  await p2pServer.listen();
 
-  p2pServer.syncChains();
-
-  // Start PoS block production
+  // Start PoS block production only after network is ready
+  console.log('🚀 Starting block production...\n');
   p2pServer.startBlockProduction();
+
+  // Sensor data simulation (if enabled)
+  function generateAndSendSensorData() {
+    const sensor_id = "sensor-" + Math.floor(Math.random() * 1000);
+    const reading = {
+      value: parseFloat((Math.random() * 100).toFixed(2)),
+    };
+    const metadata = {
+      timestamp: Date.now(),
+      unit: "Celsius"
+    };
+
+    try {
+      const tx = wallet.createTransaction(sensor_id, reading, tp, metadata);
+      p2pServer.transactionPool.updateOrAddTransaction(tx);
+      p2pServer.broadcastTransaction(tx);
+      console.log(
+        "✨ Generated and broadcasted sensor data for sensor-id:",
+        sensor_id,
+        "| Value:",
+        reading.value + "°C"
+      );
+    } catch (error) {
+      console.error("❌ Error generating sensor data:", error.message);
+    }
+  }
+
+  if (ENABLE_SENSOR_SIM) {
+    console.log('🌡️  Sensor data simulation ENABLED (every 10 seconds)\n');
+    setInterval(generateAndSendSensorData, 10000);
+    // Generate first transaction immediately
+    setTimeout(generateAndSendSensorData, 5000);
+  } else {
+    console.log("❌ Sensor data simulation disabled\n");
+  }
 };
 
 startServer();

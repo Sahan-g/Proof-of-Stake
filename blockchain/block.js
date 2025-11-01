@@ -1,7 +1,7 @@
 const ChainUtil = require('../chain-util');
 
 class Block {
-    constructor({index, timestamp, transactions, previousHash, proposerPublicKey, hash, signature, stake, lastBlockTime, wallet}) {
+    constructor({index, timestamp, transactions, previousHash, proposerPublicKey, hash, signature, stake, lastBlockTime, vrfProof, wallet}) {
         this.index = index; 
         this.timestamp = timestamp ? timestamp : Date.now();
         this.transactions = transactions; 
@@ -9,8 +9,9 @@ class Block {
         this.proposerPublicKey = proposerPublicKey;
         this.stake = stake || 0; // Validator's stake amount
         this.lastBlockTime = lastBlockTime || this.timestamp; // For block time validation
+        this.vrfProof = vrfProof || null; // VRF proof for validator selection
         this.hash = hash ? hash : this.computeHash();
-        this.signature = signature ? signature : wallet.sign(this.hash);
+        this.signature = signature ? signature : (wallet ? wallet.sign(this.hash) : null);
     }
 
     computeHash() {
@@ -120,7 +121,8 @@ class Block {
             hash, 
             signature,
             stake,
-            lastBlockTime 
+            lastBlockTime,
+            vrfProof
         } = obj;
         return new this({
             index, 
@@ -131,7 +133,8 @@ class Block {
             hash, 
             signature,
             stake,
-            lastBlockTime
+            lastBlockTime,
+            vrfProof
         });
     }
 }

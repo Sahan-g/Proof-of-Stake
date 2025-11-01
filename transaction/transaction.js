@@ -32,10 +32,13 @@ class Transaction {
 
   static signTransaction(transaction, senderWallet) {
     const payload = transaction._signablePayload();
+    const hash = ChainUtil.createHash(payload);
+    
+    transaction.hash = hash;
     transaction.input = {
       timestamp: Date.now(),
       address: senderWallet.publicKey,
-      signature: senderWallet.sign(ChainUtil.createHash(payload)),
+      signature: senderWallet.sign(hash),
     };
     return transaction;
   }
@@ -46,15 +49,18 @@ class Transaction {
       return false;
     }
 
-    const payload = {
-      id: transaction.id,
-      timestamp: transaction.timestamp,
-      sensor_id: transaction.sensor_id,
-      reading: transaction.reading,
-      metadata: transaction.metadata,
-    };
-    
-    const hash = ChainUtil.createHash(payload);
+    // Use stored hash or recalculate if missing
+    let hash = transaction.hash;
+    if (!hash) {
+      const payload = {
+        id: transaction.id,
+        timestamp: transaction.timestamp,
+        sensor_id: transaction.sensor_id,
+        reading: transaction.reading,
+        metadata: transaction.metadata,
+      };
+      hash = ChainUtil.createHash(payload);
+    }
 
     return ChainUtil.verifySignature(
       transaction.input.address,
